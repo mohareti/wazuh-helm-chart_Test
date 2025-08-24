@@ -1,75 +1,95 @@
 # Wazuh Helm Chart
 
-![Version: 0.0.7](https://img.shields.io/badge/Version-0.0.7-informational?style=flat-square)
-![AppVersion: 4.11.1](https://img.shields.io/badge/AppVersion-4.11.1-informational?style=flat-square)
-[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/wazuh-helm)](https://artifacthub.io/packages/helm/wazuh-helm/wazuh)
+Cloud-agnostic Helm chart for deploying Wazuh with secure defaults and optional integrations.
 
-Wazuh is a free and open source security platform that unifies XDR and SIEM protection for endpoints and cloud workloads.
+## Prerequisites
+- Kubernetes cluster 1.27+
+- kubectl and Helm v3
+- Metrics Server for HPA
+- Ingress controller and cert-manager when using ingress/TLS
 
-## Get Helm Repository Info
+## Values
 
-```bash
-helm repo add wazuh-helm https://promptlylabs.github.io/wazuh-helm-chart/
-helm repo update
-```
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `image.repository` | string | `ghcr.io/example/wazuh` | Container image repository |
+| `image.tag` | string | `4.11.1` | Image tag |
+| `replicaCount` | int | `2` | Number of replicas |
+| `autoscaling.enabled` | bool | `true` | Enable HPA |
+| `service.type` | string | `ClusterIP` | Service type |
+| `service.port` | int | `80` | Service port |
+| `ingress.enabled` | bool | `true` | Create ingress |
+| `cloud.provider` | string | `generic` | Target cloud provider |
+| `resources.requests.cpu` | string | `200m` | CPU request |
+| `resources.limits.cpu` | string | `1` | CPU limit |
 
-## Install Helm Chart
+## Deploy-Any-Cloud Guide
+1. **Prereqs**: kubectl, Helm v3, a Kubernetes cluster, and permissions. Ensure Metrics Server is installed. If using Ingress/TLS: install an ingress controller and cert-manager.
+2. **Create namespace**:
+   ```bash
+   kubectl create namespace <ns>
+   ```
+3. **Inspect and validate**:
+   ```bash
+   helm lint ./charts/wazuh
+   helm template ./charts/wazuh -n <ns> --values charts/wazuh/values.dev.yaml | kubeconform -strict -ignore-missing-schemas
+   ```
+4. **Install (dev example)**:
+   ```bash
+   helm install <release> ./charts/wazuh -n <ns> -f charts/wazuh/values.dev.yaml
+   ```
+5. **Verify**:
+   ```bash
+   kubectl -n <ns> rollout status deploy/<release>
+   kubectl -n <ns> get pods,svc,hpa,ingress
+   ```
+6. **Enable autoscaling (if not default)**:
+   ```bash
+   helm upgrade <release> ./charts/wazuh -n <ns> --reuse-values --set autoscaling.enabled=true
+   ```
+7. **Trigger scale test (example)**:
+   ```bash
+   kubectl -n <ns> run hey --image=ghcr.io/rakyll/hey -it --rm -- <service-url>
+   kubectl -n <ns> describe hpa <release>
+   ```
+8. **Ingress/TLS**:
+   - Set `ingress.enabled=true`, `ingress.className`, hosts, and TLS secret in your values file.
+9. **Clean up**:
+   ```bash
+   helm uninstall <release> -n <ns>
+   ```
 
-```bash
-helm install [RELEASE_NAME] wazuh-helm/wazuh
-```
+## Provider Notes
+### EKS
+- When `cloud.provider=eks` set ALB annotations under `cloud.lbAnnotations`.
+- Consider IAM roles for service accounts for cloud permissions.
+- Install Metrics Server from AWS Helm repository.
 
-## Information
+### GKE
+- With `cloud.provider=gke` use GCE Ingress annotations in `cloud.lbAnnotations`.
+- Ensure project has sufficient quota for load balancers.
+- Metrics Server is pre-installed on Autopilot; otherwise install manually.
 
-The Helm Chart installs the following components:
+### AKS
+- With `cloud.provider=aks` use AGIC or NGINX annotations accordingly in `cloud.lbAnnotations`.
+- Configure managed identity when accessing Azure resources.
+- For persistent volumes use `azure-file` or `azure-disk` StorageClasses.
 
-- [Wazuh Dashboard](https://documentation.wazuh.com/current/getting-started/components/wazuh-dashboard.html)
-- [Wazuh Indexer](https://documentation.wazuh.com/current/getting-started/components/wazuh-indexer.html)
-- [Wazuh Manager](https://documentation.wazuh.com/current/getting-started/components/wazuh-server.html) (Master and Worker nodes)
+## Troubleshooting
+- Use `helm template` to inspect rendered manifests.
+- Check events with `kubectl describe` for failing pods.
+- Ensure network policies allow required traffic when enabled.
 
-HTTPS communication between components is enabled by default and set up using self-signed certificates, provided by [cert-manager](https://cert-manager.io/).
-
-## Configuration
-
-### Wazuh Manager
-
-The [`ossec.conf`](http://documentation.wazuh.com/current/user-manual/reference/ossec-conf/) file is the main configuration file on the Wazuh manager. It is created on the `_helpers.tpl` file and passed via `values.yaml`.
-
-This configuration can be replaced, by setting a different value for `wazuh.master.conf` and `waazuh.worker.conf` in the `values.yaml` file. Or extra parameters can be appended to the configuration file by setting the `wazuh.master.extraConf` and `wazuh.worker.extraConf` values.
-
-```yaml
-wazuh:
-  master:
-    conf: |
-      <ossec_config>
-        ...
-    extraConf: |
-      ...
-```
-
-### Wazuh Indexer
-
-The Wazuh Indexer has 2 configuration files: `opensearch` and `internalUsers`. These files are created on the `_helpers.tpl` file and passed via `values.yaml` and can also be replaced by setting a different value for `indexer.config.opensearch` and `indexer.config.internalUsers` in the `values.yaml` file.
-
-```yaml
-indexer:
-  config:
-    opensearch: |
-      ...
-    internalUsers: |
-      ...
-```
-
-### Wazuh Dashboard
-
-The Wazuh Dashboard has [1 configuration file](https://documentation.wazuh.com/current/user-manual/wazuh-dashboard/settings.html). This file is created on the `_helpers.tpl` file and passed via `values.yaml` and can also be replaced by setting a different value for `dashboard.config` in the `values.yaml` file.
-
-```yaml
-dashboard:
-  config: |
-    ...
-```
-
-## Contributing
-
-Feel free to contact the maintainer of this repository for any questions or concerns. Contributions are encouraged and appreciated.
+## Scaling Examples
+- Scale up manually:
+  ```bash
+  kubectl -n <ns> scale deploy/<release> --replicas=5
+  ```
+- Scale down manually:
+  ```bash
+  kubectl -n <ns> scale deploy/<release> --replicas=1
+  ```
+- Observe HPA decisions:
+  ```bash
+  kubectl -n <ns> get hpa <release> -w
+  ```

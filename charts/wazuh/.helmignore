@@ -1,0 +1,6 @@
+# Chart dependencies
+charts
+*.tgz
+.DS_Store
+.git/
+.github/
